@@ -1,8 +1,48 @@
 library(shiny) # you may need to install.packages() this
 library(tidyverse)
-
+library(devtools)
+library(dplyr)
+library(gganimate)
+library(ggforce)
+library(ggplot2)
+library(readr)
 library(shiny)
 library(fec16)
+
+source_url("https://raw.githubusercontent.com/asonty/ngs_highlights/master/utils/scripts/data_utils.R")
+source_url("https://raw.githubusercontent.com/asonty/ngs_highlights/master/utils/scripts/plot_utils.R")
+
+
+bal_highlights <- fetch_highlights_list(team_ = "BAL", season_ = 2019)
+bal_play_data <- fetch_play_data(playKey_ = 242)
+first_frame <- bal_play_data %>%
+  filter(event == "line_set") %>% 
+  distinct(frame) %>% 
+  slice_max(frame) %>% 
+  pull()
+final_frame <- bal_play_data %>% 
+  filter(event == "tackle" | event == "touchdown" | event == "out_of_bounds") %>% 
+  distinct(frame) %>% 
+  slice_max(frame) %>% 
+  pull()
+
+
+kc_highlights <- fetch_highlights_list(team_ = "KC", season_ = 2019)
+kc_play_data <- fetch_play_data(playKey_ = 370)
+first_frame_kc <- kc_play_data %>%
+  filter(event == "line_set") %>% 
+  distinct(frame) %>% 
+  slice_max(frame) %>% 
+  pull()
+final_frame_kc <- kc_play_data %>% 
+  filter(event == "tackle" | event == "touchdown" | event == "out_of_bounds") %>% 
+  distinct(frame) %>% 
+  slice_max(frame) %>% 
+  pull()
+
+
+
+
 
 # This is just a normal object
 
@@ -102,11 +142,20 @@ ui <- fluidPage(navbarPage(
       textOutput("size_message"),
       textOutput("color_message"),
       textOutput("text_message"),
-      plotOutput("state_plot")
+      plotOutput("bal_plot"),
+      plotOutput("kc_plot")
     )
   ),
   tabPanel("About",
-             h3("This is an about me! My name is _______"))
+             h3("Hello! My name is Aidan Borguet. 
+                I am a football player studying government at Harvard, so I had a 
+                natural inclination to study the next gen statistics 
+                related to football. This project contains information 
+                collected by next gen, which tracks a multitude of data in 
+                different sports. For football, they keep track of
+                different plays, time, yardage, speed and so on. By 
+                using these statistics, we can determine which types of 
+                plays worked for certain teams during the NFL season."))
   )
 )
 
@@ -146,21 +195,20 @@ server <- function(input, output, session) {
   
   # Just like renderText(), we can renderPlot()!
   
-  output$state_plot <- renderPlot({
+  output$bal_plot <- renderPlot({
     # we need to use () here after the name of our dataset because it is reactive!
-    results() %>%
-      
-      # notice we are using the selected_state variable defined above!
-      
-      filter(state == input$selected_state) %>%
-      
-      # this plot is just like normal!
-      ggplot(aes(x = primary_percent, y = general_percent)) +
-      geom_point(size = input$selected_size,
-                 color = input$selected_color) +
-      labs(title = input$entered_text) +
-      theme_bw()
+    bal_play_data <- fetch_play_data(playKey_ = 242) 
+    plot_play_frame(play_data_ = bal_play_data, frame_ = 180)
+    plot_play_frame(play_data_ = bal_play_data, frame_ = 200, velocities_ = T)
   })
+  
+  output$kc_plot <- renderPlot({
+    # we need to use () here after the name of our dataset because it is reactive!
+    kc_play_data <- fetch_play_data(playKey_ = 370) 
+    plot_play_frame(play_data_ = kc_play_data, frame_ = 180)
+    plot_play_frame(play_data_ = kc_play_data, frame_ = 200, velocities_ = T)
+  })
+  
   
 }
 
