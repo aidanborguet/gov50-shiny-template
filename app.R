@@ -8,6 +8,8 @@ library(ggplot2)
 library(readr)
 library(shiny)
 library(fec16)
+library(patchwork)
+library(shinythemes)
 
 source_url("https://raw.githubusercontent.com/asonty/ngs_highlights/master/utils/scripts/data_utils.R")
 source_url("https://raw.githubusercontent.com/asonty/ngs_highlights/master/utils/scripts/plot_utils.R")
@@ -15,34 +17,12 @@ source_url("https://raw.githubusercontent.com/asonty/ngs_highlights/master/utils
 
 bal_highlights <- fetch_highlights_list(team_ = "BAL", season_ = 2019)
 bal_play_data <- fetch_play_data(playKey_ = 242)
-first_frame <- bal_play_data %>%
-  filter(event == "line_set") %>% 
-  distinct(frame) %>% 
-  slice_max(frame) %>% 
-  pull()
-final_frame <- bal_play_data %>% 
-  filter(event == "tackle" | event == "touchdown" | event == "out_of_bounds") %>% 
-  distinct(frame) %>% 
-  slice_max(frame) %>% 
-  pull()
-
 
 kc_highlights <- fetch_highlights_list(team_ = "KC", season_ = 2019)
 kc_play_data <- fetch_play_data(playKey_ = 370)
-first_frame_kc <- kc_play_data %>%
-  filter(event == "line_set") %>% 
-  distinct(frame) %>% 
-  slice_max(frame) %>% 
-  pull()
-final_frame_kc <- kc_play_data %>% 
-  filter(event == "tackle" | event == "touchdown" | event == "out_of_bounds") %>% 
-  distinct(frame) %>% 
-  slice_max(frame) %>% 
-  pull()
 
-
-
-
+no_highlights <- fetch_highlights_list(team_ = "NO", season_ = 2019)
+no_play_data <- fetch_play_data(playKey_ = 449)
 
 # This is just a normal object
 
@@ -51,6 +31,164 @@ state.names <- c("CA", "NY", "KS")
 # Make change to your dataset
 results_house <- results_house %>%
   select(-footnotes)
+
+plot_play_frame <- function(play_data_, frame_, velocities_=F, voronoi_=F, caption_=T) {
+  
+  if(is.null(play_data_)) {
+    print("error: need to provide play data")
+    return()
+  }
+  if(is.null(frame_)) {
+    print("error: need to provide frame of play to visualize")
+    return()
+  }
+  
+  # * get play metadata ----
+  play_desc <- play_data_$playDescription %>% .[1]
+  play_dir <- play_data_$playDirection %>% .[1]
+  yards_togo <- play_data_$yardsToGo %>% .[1]
+  los <- play_data_$absoluteYardlineNumber %>% .[1]
+  togo_line <- if(play_dir=="left") los-yards_togo else los+yards_togo
+  first_frame <- play_data_ %>%
+    filter(event == "line_set") %>% 
+    distinct(frame) %>% 
+    slice_max(frame) %>% 
+    pull()
+  final_frame <- play_data_ %>% 
+    filter(event == "tackle" | event == "touchdown" | event == "out_of_bounds") %>% 
+    distinct(frame) %>% 
+    slice_max(frame) %>% 
+    pull() + 10
+  
+  # * separate player and ball tracking data ----
+  player_data <- play_data_ %>% 
+    filter(frame == frame_) %>% 
+    select(frame, homeTeamFlag, teamAbbr, displayName, jerseyNumber, position, positionGroup,
+           x, y, s, o, dir, event) %>% 
+    filter(displayName != "ball")
+  ball_data <- play_data_ %>% 
+    filter(frame == frame_) %>% 
+    select(frame, homeTeamFlag, teamAbbr, displayName, jerseyNumber, position, positionGroup,
+           x, y, s, o, dir, event) %>% 
+    filter(displayName == "ball")
+  
+  # * get team details ----
+  h_team <- play_data_ %>% filter(homeTeamFlag == 1) %>% distinct(teamAbbr) %>% pull()
+  a_team <- play_data_ %>% filter(homeTeamFlag == 0) %>% distinct(teamAbbr) %>% pull()
+  team_colors <- fetch_team_colors(h_team_ = h_team, a_team_ = a_team)
+  h_team_color1 <- team_colors[1]
+  h_team_color2 <- team_colors[2]
+  a_team_color1 <- team_colors[3]
+  a_team_color2 <- team_colors[4]
+  
+  # * compute velocity components ----
+  #  velocity angle in radians
+  player_data$dir_rad <- player_data$dir * pi / 180
+  
+  #  velocity components
+  player_data$v_x <- sin(player_data$dir_rad) * player_data$s
+  player_data$v_y <- cos(player_data$dir_rad) * player_data$s
+  
+  # * create plot ----
+  if (voronoi_ == T) {
+    div_team_colors <- fetch_team_colors(h_team_ = h_team, a_team_ = a_team, diverge_ = T)
+    
+    colors_df <- tibble(a = div_team_colors[1], b = div_team_colors[3])
+    colnames(colors_df) <- c(h_team, a_team)
+    
+    play_frame_plot <- plot_field(field_color = "white", line_color = "#343a40") +
+      geom_voronoi_tile(
+        data = player_data %>% filter(x >= 0, x <= 120, y >= 0, y <= 160/3), 
+        bound = c(0, 120, 0, 160/3),
+        mapping = aes(x = x, y = y, fill = teamAbbr, group = -1L),
+        colour = "white",
+        size = 0.5,
+        alpha = 0.5
+      ) +
+      scale_fill_manual(values = colors_df, name = "Team")
+  } else {
+    play_frame_plot <- plot_field()
+  }
+  
+  play_frame_plot <- play_frame_plot +
+    # line of scrimmage
+    annotate(
+      "segment",
+      x = los, xend = los, y = 0, yend = 160/3,
+      colour = "#0d41e1"
+    ) +
+    # 1st down marker
+    annotate(
+      "segment",
+      x = togo_line, xend = togo_line, y = 0, yend = 160/3,
+      colour = "#f9c80e"
+    )
+  
+  if (velocities_ == T) {
+    play_frame_plot <- play_frame_plot +
+      # away team velocities
+      geom_segment(
+        data = player_data %>% filter(teamAbbr == a_team),
+        mapping = aes(x = x, y = y, xend = x + v_x, yend = y + v_y),
+        colour = a_team_color1, size = 1, arrow = arrow(length = unit(0.01, "npc"))
+      ) + 
+      # home team velocities
+      geom_segment(
+        data = player_data %>% filter(teamAbbr == h_team),
+        mapping = aes(x = x, y = y, xend = x + v_x, yend = y + v_y),
+        colour = h_team_color1, size = 1, arrow = arrow(length = unit(0.01, "npc"))
+      ) 
+  }
+  
+  play_frame_plot <- play_frame_plot +
+    # away team locs and jersey numbers
+    geom_point(
+      data = player_data %>% filter(teamAbbr == a_team),
+      mapping = aes(x = x, y = y),
+      fill = "#ffffff", color = a_team_color2,
+      shape = 21, alpha = 1, size = 6
+    ) +
+    geom_text(
+      data = player_data %>% filter(teamAbbr == a_team),
+      mapping = aes(x = x, y = y, label = jerseyNumber),
+      color = a_team_color1, size = 3.5, #family = "mono"
+    ) +
+    # home team locs and jersey numbers
+    geom_point(
+      data = player_data %>% filter(teamAbbr == h_team),
+      mapping = aes(x = x, y = y),
+      fill = h_team_color1, color = h_team_color2,
+      shape = 21, alpha = 1, size = 6
+    ) +
+    geom_text(
+      data = player_data %>% filter(teamAbbr == h_team),
+      mapping = aes(x = x, y = y, label = jerseyNumber),
+      color = h_team_color2, size = 3.5, #family = "mono"
+    ) +
+    # ball
+    geom_point(
+      data = ball_data,
+      mapping = aes(x = x, y = y),
+      fill = "#935e38", color = "#d9d9d9",
+      shape = 21, alpha = 1, size = 4
+    ) +
+    NULL
+  
+  play_frame_plot <- play_frame_plot +
+    labs(
+      subtitle = paste("Frame: ", frame_)
+    )
+  
+  if (caption_ == T) {
+    play_frame_plot <- play_frame_plot +
+      labs(
+        caption = "Source: NFL Next Gen Stats"
+      )
+  }
+  
+  return(play_frame_plot)
+}
+
 
 ######################################################################################
 ######################################################################################
@@ -70,9 +208,10 @@ results_house <- results_house %>%
 #      -- You can also click the green "Run App" button on the top right or
 #         run runApp() in the console
 
-ui <- fluidPage(navbarPage(
-  "Shiny Example",
-  
+ui <- fluidPage(
+  navbarPage(
+  "NFL's Best Plays",
+  theme = shinytheme("slate"),
   tabPanel(
     "Main",
     
@@ -83,20 +222,15 @@ ui <- fluidPage(navbarPage(
     # Here is a sidebar!
     
     sidebarPanel(
-      selectInput(
-        inputId = "selected_state",                 # a name for the value you choose here
-        label = "Choose a state from this list!",   # the name to display on the slider
-        choices = state.names                       # your list of choices to choose from
-      ),
+      h3("Welcome to my Football Analysis"),
+      p("This data shows successful NFL plays that occured at different points
+        in the 2019 football season. This data is used by teams and statisticians
+        around the league. It helps teams determine which plays worked best in different
+        situations. The graphs will reveal what kinds of positions each player
+        was in when a successful play was made, which can give you an idea
+       as to what plays may be good for them in the future."), 
       
-      sliderInput(
-        inputId = "selected_size",                  # a name for the value you choose here
-        label = "Choose a number as a point size:", # the label to display above the slider
-        min = 0,                                    # the min, max, and initial values
-        max = 5,
-        value = 2 
-      )
-      
+      tags$img(src = "https://www.psdcovers.com/wp-content/uploads/2012/07/NFL-vector-logos.jpg", height = 160, width = 220)
     ),
     
     
@@ -105,7 +239,7 @@ ui <- fluidPage(navbarPage(
     mainPanel(
       # - You can also make your UI more complicated with UI elements.
       #
-      #   -- In general, these are defined by functions that you give arguments to 
+      #   -- In general, these are defined by functions that you give arguments to
       #      (e.g. min and max values).
       #
       # - These include:
@@ -118,45 +252,48 @@ ui <- fluidPage(navbarPage(
       #
       #   -- textInput() lets you enter whatever text you want.
       #
-      #   -- Lots of other options, like entering a date. Look at the resources for 
+      #   -- Lots of other options, like entering a date. Look at the resources for
       #      other choices!
       #
-      # - You then assign these inputs to a value and use those values in other places, 
+      # - You then assign these inputs to a value and use those values in other places,
       #   like in plots!
       #
       # - All of these functions have their own arguments. For example:
       
-      radioButtons(
-        inputId = "selected_color",             # a name for the value you choose here
-        label = "Choose a color!",              # the label to display above the buttons
-        choices = c("red", "blue", "green")     # the button values to choose from
-      ),
+      HTML('<iframe width="400" height="215" src="https://www.youtube.com/embed/n2Z29ukhcl0" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>'), 
+      HTML('<iframe width="400" height="215" src="https://www.youtube.com/embed/Iif2NWLiZZI" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>'),
+      HTML('<iframe width="400" height="215" src="https://www.youtube.com/embed/0EPfo2daaHA" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>'), 
       
-      textInput(
-        inputId = "entered_text",               # a name for the value you choose here
-        label = "Place your title text here:",  # a label above the text box
-        value = "Example Title"                 # an initial value for the box
-      ),
       
-      textOutput("state_message"),              # load a text object called "state_message"
-      textOutput("size_message"),
-      textOutput("color_message"),
-      textOutput("text_message"),
       plotOutput("bal_plot"),
-      plotOutput("kc_plot")
+      p("The plot above shows a play run by the Baltimore that went for a touchdown. 
+        The arrows show the directions of the players during the sequence. 
+        The brown dot represents the football in Lamar Jackson's hands as he
+        runs for a score. "),
+      plotOutput("kc_plot"),
+      p("This plot depicts a pass from Patrick Mahomes to Mecole Hardman of the Superbowl winning
+      Kansas City Chiefs. It shows what kind of play was run and where all the respective
+        players were when a touchdown occured."), 
+      plotOutput("no_plot"),
+      p("This play shows a 15 yard touchdown run by the Saints' running back,
+        Alvin Kamara. It is easy to see why he is regarded as one of the best running backs
+        in the NFL. As you can see, he is swarmed by red jerseys all around him and
+         is still able to score, which is what makes him special. ")
     )
   ),
   tabPanel("About",
-             h3("Hello! My name is Aidan Borguet. 
-                I am a football player studying government at Harvard, so I had a 
-                natural inclination to study the next gen statistics 
-                related to football. This project contains information 
-                collected by next gen, which tracks a multitude of data in 
+           h3("Hello!"),
+           p("My name is Aidan Borguet.
+                I am a football player studying government at Harvard, so I had a
+                natural inclination to study the next gen statistics
+                related to football. This project contains information
+                collected by next gen, which tracks a multitude of data in
                 different sports. For football, they keep track of
-                different plays, time, yardage, speed and so on. By 
-                using these statistics, we can determine which types of 
-                plays worked for certain teams during the NFL season."))
-  )
+                different plays, time, yardage, speed and so on. By
+                using these statistics, we can determine which types of
+                plays worked for certain teams during the NFL season."),
+           tags$img(src = "https://thespun.com/wp-content/uploads/2019/04/GettyImages-856335926-775x465.jpg", height = 365, width = 675) )
+)
 )
 
 server <- function(input, output, session) {
@@ -166,48 +303,30 @@ server <- function(input, output, session) {
   #
   #   -- so here, renderText() is updating live text based on your choice.
   
-  output$state_message <- renderText({
-    paste0("This is the state you chose: ", # this is just a string, so it will never change
-           input$selected_state, "!")       # this is based on your input, selected_state defined above.
-  })
   
-  output$size_message <- renderText({
-    paste0("This is the size you chose: ", # this is just a string, so it will never change
-           input$selected_size, "!")       # this is based on your input, selected_state defined above.
-  })
-  
-  output$color_message <- renderText({
-    paste0("This is the color you chose: ", # this is just a string, so it will never change
-           input$selected_color, "!")       # this is based on your input, selected_state defined above.
-  })
-  
-  output$text_message <- renderText({
-    paste0("This is the label you typed: ", # this is just a string, so it will never change
-           input$entered_text, "!")       # this is based on your input, selected_state defined above.
-  })
   
   # This line makes our dataset reactive.
   # That is, we can update it based on the values of input that define above.
   
-  results <- reactive({
-    results_house
-  })
+  
   
   # Just like renderText(), we can renderPlot()!
   
   output$bal_plot <- renderPlot({
-    # we need to use () here after the name of our dataset because it is reactive!
-    bal_play_data <- fetch_play_data(playKey_ = 242) 
-    plot_play_frame(play_data_ = bal_play_data, frame_ = 180)
-    plot_play_frame(play_data_ = bal_play_data, frame_ = 200, velocities_ = T)
+    plot_play_frame(play_data_ = bal_play_data, frame_ = 242, velocities = TRUE)
   })
   
   output$kc_plot <- renderPlot({
     # we need to use () here after the name of our dataset because it is reactive!
-    kc_play_data <- fetch_play_data(playKey_ = 370) 
-    plot_play_frame(play_data_ = kc_play_data, frame_ = 180)
-    plot_play_frame(play_data_ = kc_play_data, frame_ = 200, velocities_ = T)
+    plot_play_frame(play_data_ = kc_play_data, frame_ = 200, velocities = TRUE)
   })
+  
+  output$no_plot <- renderPlot({
+    # we need to use () here after the name of our dataset because it is reactive!
+    plot_play_frame(play_data_ = no_play_data, frame_ = 155, velocities = TRUE)
+  })
+  
+  
   
   
 }
