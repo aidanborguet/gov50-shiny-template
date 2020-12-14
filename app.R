@@ -262,6 +262,7 @@ ui <- fluidPage(
                 different plays, time, yardage, speed and so on. By
                 using these statistics, we can determine which types of
                 plays worked for certain teams during the NFL season."),
+           helpText(a("Here is the link to my repo:", href = "https://github.com/aidanborguet/gov50-shiny-template")) ,
            tags$img(src = "https://thespun.com/wp-content/uploads/2019/04/GettyImages-856335926-775x465.jpg", height = 365, width = 675) )
 )
 )
