@@ -1,4 +1,4 @@
-library(shiny) # you may need to install.packages() this
+library(shiny) 
 library(tidyverse)
 library(devtools)
 library(dplyr)
@@ -10,11 +10,16 @@ library(shiny)
 library(fec16)
 library(patchwork)
 library(shinythemes)
+library(rstanarm)
+library(gtsummary)
+library(broom.mixed)
+library(gt)
 
+source("final_proj_code2.R")
 source_url("https://raw.githubusercontent.com/asonty/ngs_highlights/master/utils/scripts/data_utils.R")
 source_url("https://raw.githubusercontent.com/asonty/ngs_highlights/master/utils/scripts/plot_utils.R")
 
-
+# these here were used to select the plays that I needed for the plots
 bal_highlights <- fetch_highlights_list(team_ = "BAL", season_ = 2019)
 bal_play_data <- fetch_play_data(playKey_ = 242)
 
@@ -24,13 +29,7 @@ kc_play_data <- fetch_play_data(playKey_ = 370)
 no_highlights <- fetch_highlights_list(team_ = "NO", season_ = 2019)
 no_play_data <- fetch_play_data(playKey_ = 449)
 
-# This is just a normal object
 
-state.names <- c("CA", "NY", "KS")
-
-# Make change to your dataset
-results_house <- results_house %>%
-  select(-footnotes)
 
 plot_play_frame <- function(play_data_, frame_, velocities_=F, voronoi_=F, caption_=T) {
   
@@ -43,7 +42,7 @@ plot_play_frame <- function(play_data_, frame_, velocities_=F, voronoi_=F, capti
     return()
   }
   
-  # * get play metadata ----
+  
   play_desc <- play_data_$playDescription %>% .[1]
   play_dir <- play_data_$playDirection %>% .[1]
   yards_togo <- play_data_$yardsToGo %>% .[1]
@@ -60,7 +59,7 @@ plot_play_frame <- function(play_data_, frame_, velocities_=F, voronoi_=F, capti
     slice_max(frame) %>% 
     pull() + 10
   
-  # * separate player and ball tracking data ----
+  
   player_data <- play_data_ %>% 
     filter(frame == frame_) %>% 
     select(frame, homeTeamFlag, teamAbbr, displayName, jerseyNumber, position, positionGroup,
@@ -72,7 +71,7 @@ plot_play_frame <- function(play_data_, frame_, velocities_=F, voronoi_=F, capti
            x, y, s, o, dir, event) %>% 
     filter(displayName == "ball")
   
-  # * get team details ----
+  
   h_team <- play_data_ %>% filter(homeTeamFlag == 1) %>% distinct(teamAbbr) %>% pull()
   a_team <- play_data_ %>% filter(homeTeamFlag == 0) %>% distinct(teamAbbr) %>% pull()
   team_colors <- fetch_team_colors(h_team_ = h_team, a_team_ = a_team)
@@ -81,15 +80,14 @@ plot_play_frame <- function(play_data_, frame_, velocities_=F, voronoi_=F, capti
   a_team_color1 <- team_colors[3]
   a_team_color2 <- team_colors[4]
   
-  # * compute velocity components ----
-  #  velocity angle in radians
+  
   player_data$dir_rad <- player_data$dir * pi / 180
   
-  #  velocity components
+  
   player_data$v_x <- sin(player_data$dir_rad) * player_data$s
   player_data$v_y <- cos(player_data$dir_rad) * player_data$s
   
-  # * create plot ----
+  
   if (voronoi_ == T) {
     div_team_colors <- fetch_team_colors(h_team_ = h_team, a_team_ = a_team, diverge_ = T)
     
@@ -111,13 +109,13 @@ plot_play_frame <- function(play_data_, frame_, velocities_=F, voronoi_=F, capti
   }
   
   play_frame_plot <- play_frame_plot +
-    # line of scrimmage
+    
     annotate(
       "segment",
       x = los, xend = los, y = 0, yend = 160/3,
       colour = "#0d41e1"
     ) +
-    # 1st down marker
+    
     annotate(
       "segment",
       x = togo_line, xend = togo_line, y = 0, yend = 160/3,
@@ -126,13 +124,13 @@ plot_play_frame <- function(play_data_, frame_, velocities_=F, voronoi_=F, capti
   
   if (velocities_ == T) {
     play_frame_plot <- play_frame_plot +
-      # away team velocities
+      
       geom_segment(
         data = player_data %>% filter(teamAbbr == a_team),
         mapping = aes(x = x, y = y, xend = x + v_x, yend = y + v_y),
         colour = a_team_color1, size = 1, arrow = arrow(length = unit(0.01, "npc"))
       ) + 
-      # home team velocities
+      
       geom_segment(
         data = player_data %>% filter(teamAbbr == h_team),
         mapping = aes(x = x, y = y, xend = x + v_x, yend = y + v_y),
@@ -141,7 +139,7 @@ plot_play_frame <- function(play_data_, frame_, velocities_=F, voronoi_=F, capti
   }
   
   play_frame_plot <- play_frame_plot +
-    # away team locs and jersey numbers
+    
     geom_point(
       data = player_data %>% filter(teamAbbr == a_team),
       mapping = aes(x = x, y = y),
@@ -153,7 +151,7 @@ plot_play_frame <- function(play_data_, frame_, velocities_=F, voronoi_=F, capti
       mapping = aes(x = x, y = y, label = jerseyNumber),
       color = a_team_color1, size = 3.5, #family = "mono"
     ) +
-    # home team locs and jersey numbers
+    
     geom_point(
       data = player_data %>% filter(teamAbbr == h_team),
       mapping = aes(x = x, y = y),
@@ -165,7 +163,7 @@ plot_play_frame <- function(play_data_, frame_, velocities_=F, voronoi_=F, capti
       mapping = aes(x = x, y = y, label = jerseyNumber),
       color = h_team_color2, size = 3.5, #family = "mono"
     ) +
-    # ball
+    
     geom_point(
       data = ball_data,
       mapping = aes(x = x, y = y),
@@ -187,40 +185,17 @@ plot_play_frame <- function(play_data_, frame_, velocities_=F, voronoi_=F, capti
   }
   
   return(play_frame_plot)
+  
 }
 
 
-######################################################################################
-######################################################################################
-#
-# 1. Shiny Apps have two basic parts to them
-#
-#   - The user interface (UI) defines how the app should look.
-#
-#     -- For example, the text on the page, the placement of the elements, etc.
-#
-#   - The server defines how the app should behave.
-#
-#     -- This is how live elements are updated - like selecting a state from a list.
-#
-#   - Those two pieces are combined by running shinyApp(ui, server) to create the app.
-#
-#      -- You can also click the green "Run App" button on the top right or
-#         run runApp() in the console
+#Panels where I showed graphs and explained with text
 
 ui <- fluidPage(
   navbarPage(
   "NFL's Best Plays",
   theme = shinytheme("slate"),
-  tabPanel(
-    "Main",
-    
-    # - UIs are built from "panel" functions, which specify areas of your page.
-    #
-    #   -- There is a "main panel," a "sidebar," a "title," etc.
-    
-    # Here is a sidebar!
-    
+  tabPanel("Play Graphics",
     sidebarPanel(
       h3("Welcome to my Football Analysis"),
       p("This data shows successful NFL plays that occured at different points
@@ -230,40 +205,17 @@ ui <- fluidPage(
         was in when a successful play was made, which can give you an idea
        as to what plays may be good for them in the future."), 
       
-      tags$img(src = "https://www.psdcovers.com/wp-content/uploads/2012/07/NFL-vector-logos.jpg", height = 160, width = 220)
-    ),
+      tags$img(src = "https://www.psdcovers.com/wp-content/uploads/2012/07/NFL-vector-logos.jpg", height = 160, width = 200)
+   # picture of the NFL logo
+     ),
     
-    
-    # And here is your "main panel" for the page.
-    
+    #the order in which the tab panels are put in here correlates to the app
     mainPanel(
-      # - You can also make your UI more complicated with UI elements.
-      #
-      #   -- In general, these are defined by functions that you give arguments to
-      #      (e.g. min and max values).
-      #
-      # - These include:
-      #
-      #   -- selectInput() to choose from multiple options.
-      #
-      #   -- sliderInput() lets you choose a value from a slider of values you define.
-      #
-      #   -- radioButtons() let you choose a button from a number of options
-      #
-      #   -- textInput() lets you enter whatever text you want.
-      #
-      #   -- Lots of other options, like entering a date. Look at the resources for
-      #      other choices!
-      #
-      # - You then assign these inputs to a value and use those values in other places,
-      #   like in plots!
-      #
-      # - All of these functions have their own arguments. For example:
-      
-      HTML('<iframe width="400" height="215" src="https://www.youtube.com/embed/n2Z29ukhcl0" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>'), 
-      HTML('<iframe width="400" height="215" src="https://www.youtube.com/embed/Iif2NWLiZZI" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>'),
-      HTML('<iframe width="400" height="215" src="https://www.youtube.com/embed/0EPfo2daaHA" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>'), 
-      
+      #These were the videos that did not work
+     # HTML('<iframe width="400" height="215" src="https://www.youtube.com/embed/n2Z29ukhcl0" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>'), 
+     # HTML('<iframe width="400" height="215" src="https://www.youtube.com/embed/Iif2NWLiZZI" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>'),
+     # HTML('<iframe width="400" height="215" src="https://www.youtube.com/embed/0EPfo2daaHA" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>'),
+     #tags$video(id="video2", type = "video/mp4", src = "sample_video.mp4", controls = "controls", height = 200, width = 200),
       
       plotOutput("bal_plot"),
       p("The plot above shows a play run by the Baltimore that went for a touchdown. 
@@ -281,6 +233,24 @@ ui <- fluidPage(
          is still able to score, which is what makes him special. ")
     )
   ),
+  tabPanel("Play Analysis", 
+           p("This graph shows an analysis of every single NFL
+             team and their highlight touchdowns. This will
+             show each and every team's tendencies. Using this
+             graph, we can conclude which plays were most effective 
+             for each team. This will show the probability for 
+             each type of play for each team that resulted
+             in a highlight touchdown."),
+  plotOutput("play_analysis"),
+  tableOutput("play_model"), 
+  p("This regression model shows the effect of each of the different
+    play types on the outcome of scoring a touchdown. It uses the variables 
+    observed in the graph the be able to predict values for each play. 
+    It also provides a 95% confidence interval that the values of
+    each play will fall in between the numbers expressed. The main idea is
+    that it takes the real life observations, and predicts based
+    on the variables, also known as the play directions.")), 
+  
   tabPanel("About",
            h3("Hello!"),
            p("My name is Aidan Borguet.
@@ -297,35 +267,31 @@ ui <- fluidPage(
 )
 
 server <- function(input, output, session) {
-  # - Then, you use these named objects to update the data on your site via the input object.
-  #
-  #   -- render() functions are what show content that will change live on your site.
-  #
-  #   -- so here, renderText() is updating live text based on your choice.
-  
-  
-  
-  # This line makes our dataset reactive.
-  # That is, we can update it based on the values of input that define above.
-  
-  
-  
-  # Just like renderText(), we can renderPlot()!
   
   output$bal_plot <- renderPlot({
     plot_play_frame(play_data_ = bal_play_data, frame_ = 242, velocities = TRUE)
   })
   
   output$kc_plot <- renderPlot({
-    # we need to use () here after the name of our dataset because it is reactive!
+    # kansas city plot, had to pickt he right frame to show correct timing
     plot_play_frame(play_data_ = kc_play_data, frame_ = 200, velocities = TRUE)
   })
   
   output$no_plot <- renderPlot({
-    # we need to use () here after the name of our dataset because it is reactive!
+  
     plot_play_frame(play_data_ = no_play_data, frame_ = 155, velocities = TRUE)
   })
-  
+  #model that I had used to create the regression 
+  output$play_analysis <- renderPlot(play_plot)
+    output$play_model <- renderTable({
+      stan_glm(touchdown ~ left_play + right_play + middle_play,
+               data = master_h, 
+               refresh = 0) %>%
+        tbl_regression(intercept = TRUE) %>%
+        as_gt() %>%
+        tab_header(title = "Regression of NFL Highlight Plays",
+                   subtitle = "Relationship between the touchdowns and direction")
+    })
   
   
   

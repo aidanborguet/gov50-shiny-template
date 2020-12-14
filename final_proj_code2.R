@@ -205,5 +205,25 @@ master_h <- master_highlights %>%
  # mutate(pass_play = str_detect(playDesc, "pass")) %>%
  # mutate(run_play = str_detect(playDesc, "run"))
 
-master_h %>%
-  group_by()
+play_summary <- master_h %>%
+  filter(touchdown == TRUE) %>%
+  group_by(teams) %>%
+  summarize(avg_left = mean(left_play), 
+            avg_right = mean(right_play),
+            avg_middle = mean(middle_play)) 
+play_plot <- play_summary %>%
+  filter(!(teams%in% c("NFC", "AFC"))) %>%
+  pivot_longer(cols = avg_left:avg_middle, 
+               names_to = "Direction", 
+               values_to = "Proportion") %>%
+  ggplot(aes(teams, Proportion, fill = Direction)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "NFL Highlight Plays", 
+       subtitle = "Shows proportion of highlight plays
+       in each direction", x = "Team", y = "Proportion") +
+  scale_fill_manual(labels = c("Left Play", 
+                               "Middle Play", 
+                               "Right Play"),
+                    values = c("dodgerblue", "green", "black")) +
+  theme_classic()
+  
